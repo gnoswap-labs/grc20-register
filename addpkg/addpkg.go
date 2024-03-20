@@ -2,93 +2,103 @@ package addpkg
 
 import (
 	"errors"
-	"fmt"
-	"io"
 	"log/slog"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/gnolang/gno/tm2/pkg/std"
 
 	"github.com/gnoswap-labs/grc20-register/client"
-	"github.com/gnoswap-labs/grc20-register/config"
 	"github.com/gnoswap-labs/grc20-register/estimate"
 	"github.com/gnoswap-labs/grc20-register/estimate/static"
 	"github.com/gnoswap-labs/grc20-register/keyring"
 	"github.com/gnoswap-labs/grc20-register/keyring/memory"
 
-	"github.com/go-chi/chi"
+	"github.com/joho/godotenv"
 )
 
-var errNoFundedAccount = errors.New("no funded account found")
+// Errors
+var (
+	errNoFundedAccount = errors.New("no funded account found")
+)
+
+var logger = slog.New(slog.NewTextHandler(os.Stdout, nil))
 
 // AddPkg
 type AddPkg struct {
-	estimator estimate.Estimator // gas pricing estimations
-	logger    *slog.Logger       // log feedback
-	client    client.Client      // TM2 client
-	keyring   keyring.Keyring    // the faucet keyring
-
-	mux *chi.Mux // HTTP routing
-
-	config         *config.Config     // faucet configuration
+	estimator      estimate.Estimator // gas pricing estimations
+	logger         *slog.Logger       // log feedback
+	client         client.Client      // TM2 client
+	keyring        keyring.Keyring    // the faucet keyring
 	prepareTxMsgFn PrepareTxMessageFn // transaction message creator
 }
 
-var noopLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
-
-func NewAddPkg(
-	estimator estimate.Estimator,
-	client client.Client,
-	opts ...Option,
-) (*AddPkg, error) {
-	a := &AddPkg{
-		estimator:      estimator,
-		client:         client,
-		logger:         noopLogger,
-		config:         config.DefaultConfig(),
-		prepareTxMsgFn: defaultPrepareTxMessage,
-
-		mux: chi.NewMux(),
+func init() {
+	err := godotenv.Load("addpkg/.env")
+	if err != nil {
+		logger.Error("Error loading .env file", "error", err.Error())
+		os.Exit(-1)
 	}
-
-	// Validate the configuration
-	if err := config.ValidateConfig(a.config); err != nil {
-		return nil, fmt.Errorf("invalid configuration, %w", err)
-	}
-
-	// Generate the in-memory keyring
-	a.keyring = memory.New(a.config.Mnemonic, 1)
-
-	return a, nil
 }
 
-func RegisterGrc20Token(pkgPath string) error {
-	// Create a new AddPkg instance
-	estimator := static.New(
-		std.NewCoin("ugnot", 1000), // r3v4_xxx: HARDCODED
-		10000000,
-	)
-	client := client.NewClient("http://localhost:26657") // r3v4_xxx: HARDCODED
+// REGISTER CONTRACT TEMPLATE
+// below is template for registering grc20 tokens to gnoswap
+// REF: https://github.com/gnoswap-labs/gnoswap/blob/97b7b4124328338ff379286c3a7b35de560c42e9/pool/token_register.gno#L51-L70
+var registerContractTemplate = "package token_register\n\nimport (\n\ttoken \"pkgPath\"\n\n\tpusers \"gno.land/p/demo/users\"\n\n\tpl \"gno.land/r/demo/pool\"\n\trr \"gno.land/r/demo/router\"\n\tsr \"gno.land/r/demo/staker\"\n)\n\ntype NewToken struct{}\n\nfunc (NewToken) Transfer() func(to pusers.AddressOrName, amount uint64) {\n\treturn token.Transfer\n}\n\nfunc (NewToken) TransferFrom() func(from, to pusers.AddressOrName, amount uint64) {\n\treturn token.TransferFrom\n}\n\nfunc (NewToken) BalanceOf() func(owner pusers.AddressOrName) uint64 {\n\treturn token.BalanceOf\n}\n\nfunc (NewToken) Approve() func(spender pusers.AddressOrName, amount uint64) {\n\treturn token.Approve\n}\n\nfunc init() {\n\tpl.RegisterGRC20Interface(\"pkgPath\", NewToken{})\n\n\trr.RegisterGRC20Interface(\"pkgPath\", NewToken{})\n\n\tsr.RegisterGRC20Interface(\"pkgPath\", NewToken{})\n\n}\n"
 
-	a, err := NewAddPkg(estimator, *client)
+// RegisterGrc20Token registers news grc20 token to pre-defined register contract
+// - which is defined #48 `registerContractTemplate`
+func RegisterGrc20Token(pkgPath string) error {
+	// load envs
+	gasFeeDenom := os.Getenv("GNO_GAS_FEE_DENOM")
+	gasFeeAmountStr := os.Getenv("GNO_GAS_FEE_AMOUNT")
+	gasFeeAmount, err := strconv.ParseInt(gasFeeAmountStr, 10, 64)
 	if err != nil {
+		logger.Error("error parsing gas fee amount", "error", err.Error())
+		return err
+	}
+	gasFeeWantedStr := os.Getenv("GNO_GAS_WANTED")
+	gasFeeWanted, err := strconv.ParseInt(gasFeeWantedStr, 10, 64)
+	if err != nil {
+		logger.Error("error parsing gas fee wanted", "error", err.Error())
 		return err
 	}
 
+	gnoRpcUrl := os.Getenv("GNO_RPC_URL")
+	gnoChainId := os.Getenv("GNO_CHAIN_ID")
+
+	registerMnemonic := os.Getenv("GNO_REGISTER_MNEMONIC")
+
+	// Create a new AddPkg instance
+	estimator := static.New(
+		std.NewCoin(gasFeeDenom, gasFeeAmount),
+		gasFeeWanted,
+	)
+	client := client.NewClient(gnoRpcUrl)
+
+	a := &AddPkg{
+		estimator:      estimator,
+		logger:         logger,
+		client:         *client,
+		keyring:        memory.New(registerMnemonic, 1),
+		prepareTxMsgFn: defaultPrepareTxMessage,
+	}
+
 	// Register the GRC20 token
-	return a.registerGrc20Token(pkgPath)
+	return a.registerGrc20Token(pkgPath, gnoChainId)
 }
 
-func (a *AddPkg) registerGrc20Token(pkgPath string) error {
-	// Find an account that has balance to cover the transfer
+func (a *AddPkg) registerGrc20Token(pkgPath, gnoChainId string) error {
+	// Find an account that has balance to cover tx fee
 	fundAccount, err := a.findFundedAccount()
 	if err != nil {
 		return err
 	}
 
 	// Prepare the transaction
-	template := "package token_register\n\nimport (\n\ttoken \"pkgPath\"\n\n\tpusers \"gno.land/p/demo/users\"\n\n\tpl \"gno.land/r/demo/pool\"\n\trr \"gno.land/r/demo/router\"\n\tsr \"gno.land/r/demo/staker\"\n)\n\ntype NewToken struct{}\n\nfunc (NewToken) Transfer() func(to pusers.AddressOrName, amount uint64) {\n\treturn token.Transfer\n}\n\nfunc (NewToken) TransferFrom() func(from, to pusers.AddressOrName, amount uint64) {\n\treturn token.TransferFrom\n}\n\nfunc (NewToken) BalanceOf() func(owner pusers.AddressOrName) uint64 {\n\treturn token.BalanceOf\n}\n\nfunc (NewToken) Approve() func(spender pusers.AddressOrName, amount uint64) {\n\treturn token.Approve\n}\n\nfunc init() {\n\tpl.RegisterGRC20Interface(\"pkgPath\", NewToken{})\n\n\trr.RegisterGRC20Interface(\"pkgPath\", NewToken{})\n\n\tsr.RegisterGRC20Interface(\"pkgPath\", NewToken{})\n\n\tprintln(99999999999999)\n}\n"
-	registerCode := strings.ReplaceAll(template, "pkgPath", pkgPath)
+	registerCode := strings.ReplaceAll(registerContractTemplate, "pkgPath", pkgPath)
+
 	pCfg := PrepareCfg{
 		Creator: fundAccount.GetAddress(),
 		PkgName: "token_register",
@@ -104,7 +114,7 @@ func (a *AddPkg) registerGrc20Token(pkgPath string) error {
 
 	// Sign the transaction
 	sCfg := signCfg{
-		chainID:       a.config.ChainID,
+		chainID:       gnoChainId,
 		accountNumber: fundAccount.GetAccountNumber(),
 		sequence:      fundAccount.GetSequence(),
 	}
@@ -118,18 +128,14 @@ func (a *AddPkg) registerGrc20Token(pkgPath string) error {
 	}
 
 	// Broadcast the transaction
-	// return broadcastTransaction(a.client, tx)
-
-	// Braodcast the transaction sync
 	return broadcastTransaction(a.client, tx)
 }
 
 // findFundedAccount finds an account
-// whose balance is enough to cover the send amount
+// whose balance is enough to cover tx fee
 func (a *AddPkg) findFundedAccount() (std.Account, error) {
 	// A funded account is an account that can
-	// cover the initial transfer fee, as well
-	// as the send amount
+	// cover the initial addpkg fee
 	estimatedFee := a.estimator.EstimateGasFee()
 	requiredFunds := std.NewCoins(estimatedFee)
 

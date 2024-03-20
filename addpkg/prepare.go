@@ -9,7 +9,7 @@ import (
 )
 
 // PrepareTxMessageFn is the callback method that
-// constructs the grc20 register transaction message
+// constructs the addpkg transaction message
 type PrepareTxMessageFn func(PrepareCfg) std.Msg
 
 // PrepareCfg specifies the tx prepare configuration
@@ -21,7 +21,7 @@ type PrepareCfg struct {
 }
 
 // defaultPrepareTxMessage constructs the default
-// grc20 register message
+// addpkg transaction message
 func defaultPrepareTxMessage(cfg PrepareCfg) std.Msg {
 	// REF: https://github.com/gnolang/gno/blob/173d5a28fb7851c13a93be987451efd075c39a03/gno.land/pkg/sdk/vm/msgs.go#L14-L24
 	msgAddPackage := vm.MsgAddPackage{
