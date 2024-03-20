@@ -25,7 +25,6 @@ func main() {
 	// Add the subcommands
 	cmd.Subcommands = []*ffcli.Command{
 		newStartCmd(),
-		newGenerateCmd(),
 		// newResetCmd(),
 		// newRepairCmd(),
 	}
