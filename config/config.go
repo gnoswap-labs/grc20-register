@@ -8,14 +8,12 @@ import (
 )
 
 const (
-	DefaultRpcUrl  = "http://localhost:26657" // r3v4_xxx: HARDCODED
-	DefaultChainID = "dev"                    // r3v4_xxx: HARDCODED
+	DefaultChainID = "dev"
 	//nolint:lll // Mnemonic is naturally long
-	DefaultMnemonic = "source bonus chronic canvas draft south burst lottery vacant surface solve popular case indicate oppose farm nothing bullet exhibit title speed wink action roast"
+	DefaultMnemonic = "source bonus chronic canvas draft south burst lottery vacant surface solve popular case indicate oppose farm nothing bullet exhibit title speed wink action roast" // r3v4_xxx: HARDCODED
 )
 
 var (
-	ErrInvalidRpcUrl   = errors.New("invalid rpc url")
 	ErrInvalidChainID  = errors.New("invalid chain ID")
 	ErrInvalidMnemonic = errors.New("invalid mnemonic")
 )

@@ -2,8 +2,6 @@ package addpkg
 
 import (
 	"log/slog"
-
-	"github.com/gnoswap-labs/grc20-register/config"
 )
 
 type Option func(f *AddPkg)
@@ -12,13 +10,6 @@ type Option func(f *AddPkg)
 func WithLogger(l *slog.Logger) Option {
 	return func(f *AddPkg) {
 		f.logger = l
-	}
-}
-
-// WithConfig specifies the config for the faucet
-func WithConfig(c *config.Config) Option {
-	return func(f *AddPkg) {
-		f.config = c
 	}
 }
 
