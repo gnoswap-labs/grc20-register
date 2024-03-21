@@ -16,7 +16,12 @@ import (
 	"github.com/gnoswap-labs/grc20-register/keyring/memory"
 
 	"github.com/joho/godotenv"
+
+	_ "embed"
 )
+
+//go:embed template.txt
+var template string // register contract template
 
 // Errors
 var (
@@ -42,13 +47,7 @@ func init() {
 	}
 }
 
-// REGISTER CONTRACT TEMPLATE
-// below is template for registering grc20 tokens to gnoswap
-// REF: https://github.com/gnoswap-labs/gnoswap/blob/97b7b4124328338ff379286c3a7b35de560c42e9/pool/token_register.gno#L51-L70
-var registerContractTemplate = "package token_register\n\nimport (\n\ttoken \"pkgPath\"\n\n\tpusers \"gno.land/p/demo/users\"\n\n\tpl \"gno.land/r/demo/pool\"\n\trr \"gno.land/r/demo/router\"\n\tsr \"gno.land/r/demo/staker\"\n)\n\ntype NewToken struct{}\n\nfunc (NewToken) Transfer() func(to pusers.AddressOrName, amount uint64) {\n\treturn token.Transfer\n}\n\nfunc (NewToken) TransferFrom() func(from, to pusers.AddressOrName, amount uint64) {\n\treturn token.TransferFrom\n}\n\nfunc (NewToken) BalanceOf() func(owner pusers.AddressOrName) uint64 {\n\treturn token.BalanceOf\n}\n\nfunc (NewToken) Approve() func(spender pusers.AddressOrName, amount uint64) {\n\treturn token.Approve\n}\n\nfunc init() {\n\tpl.RegisterGRC20Interface(\"pkgPath\", NewToken{})\n\n\trr.RegisterGRC20Interface(\"pkgPath\", NewToken{})\n\n\tsr.RegisterGRC20Interface(\"pkgPath\", NewToken{})\n\n}\n"
-
 // RegisterGrc20Token registers news grc20 token to pre-defined register contract
-// - which is defined #48 `registerContractTemplate`
 func RegisterGrc20Token(pkgPath string) error {
 	// load envs
 	gasFeeDenom := os.Getenv("GNO_GAS_FEE_DENOM")
@@ -97,7 +96,7 @@ func (a *AddPkg) registerGrc20Token(pkgPath, gnoChainId string) error {
 	}
 
 	// Prepare the transaction
-	registerCode := strings.ReplaceAll(registerContractTemplate, "pkgPath", pkgPath)
+	registerCode := strings.ReplaceAll(template, "pkgPath", pkgPath)
 
 	pCfg := PrepareCfg{
 		Creator: fundAccount.GetAddress(),
