@@ -166,10 +166,16 @@ func (c *addPkgCfg) exec(ctx context.Context) error {
 	// Create an Event Manager instance
 	em := events.NewManager()
 
+	// Create a TM2 client
+	tm2Client, err := client.NewClient(c.remote)
+	if err != nil {
+		return fmt.Errorf("unable to create client, %w", err)
+	}
+
 	// Create the fetcher service
 	f := fetch.New(
 		db,
-		client.NewClient(c.remote),
+		tm2Client,
 		em,
 		fetch.WithLogger(
 			logger.Named("fetcher"),

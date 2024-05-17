@@ -74,7 +74,11 @@ func RegisterGrc20Token(pkgPath string) error {
 		std.NewCoin(gasFeeDenom, gasFeeAmount),
 		gasFeeWanted,
 	)
-	client := client.NewClient(gnoRpcUrl)
+	client, err := client.NewClient(gnoRpcUrl)
+	if err != nil {
+		logger.Error("unable to create TM2 client", "error", err)
+		return err
+	}
 
 	a := &AddPkg{
 		estimator:      estimator,
