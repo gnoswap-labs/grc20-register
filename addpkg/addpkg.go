@@ -15,7 +15,7 @@ import (
 	"github.com/gnoswap-labs/grc20-register/keyring"
 	"github.com/gnoswap-labs/grc20-register/keyring/memory"
 
-	"github.com/joho/godotenv"
+	_ "github.com/joho/godotenv/autoload"
 
 	_ "embed"
 )
@@ -39,35 +39,27 @@ type AddPkg struct {
 	prepareTxMsgFn PrepareTxMessageFn // transaction message creator
 }
 
-func init() {
-	err := godotenv.Load("addpkg/.env")
-	if err != nil {
-		logger.Error("Error loading .env file", "error", err.Error())
-		os.Exit(-1)
-	}
-}
-
 // RegisterGrc20Token registers news grc20 token to pre-defined register contract
 func RegisterGrc20Token(pkgPath string) error {
 	// load envs
-	gasFeeDenom := os.Getenv("GNO_GAS_FEE_DENOM")
-	gasFeeAmountStr := os.Getenv("GNO_GAS_FEE_AMOUNT")
+	gasFeeDenom := getEnv("GNO_GAS_FEE_DENOM", "ugnot")
+	gasFeeAmountStr := getEnv("GNO_GAS_FEE_AMOUNT", "1000000")
 	gasFeeAmount, err := strconv.ParseInt(gasFeeAmountStr, 10, 64)
 	if err != nil {
 		logger.Error("error parsing gas fee amount", "error", err.Error())
 		return err
 	}
-	gasFeeWantedStr := os.Getenv("GNO_GAS_WANTED")
+	gasFeeWantedStr := getEnv("GNO_GAS_WANTED", "1000000000") // current max block gas after bump PR, https://github.com/gnolang/gno/pull/2065
 	gasFeeWanted, err := strconv.ParseInt(gasFeeWantedStr, 10, 64)
 	if err != nil {
 		logger.Error("error parsing gas fee wanted", "error", err.Error())
 		return err
 	}
 
-	gnoRpcUrl := os.Getenv("GNO_RPC_URL")
-	gnoChainId := os.Getenv("GNO_CHAIN_ID")
+	gnoRpcUrl := getEnv("GNO_RPC_URL", "http://localhost:26657")
+	gnoChainId := getEnv("GNO_CHAIN_ID", "dev")
 
-	registerMnemonic := os.Getenv("GNO_REGISTER_MNEMONIC")
+	registerMnemonic := getEnv("GNO_REGISTER_MNEMONIC", "")
 
 	// Create a new AddPkg instance
 	estimator := static.New(
@@ -179,4 +171,16 @@ func (a *AddPkg) findFundedAccount() (std.Account, error) {
 	}
 
 	return nil, errNoFundedAccount
+}
+
+func getEnv(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return value
+	}
+
+	if fallback == "" {
+		panic("missing required env variable: " + key)
+	}
+
+	return fallback
 }
