@@ -1,0 +1,46 @@
+name: Deploy by main push
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: development
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Login to docker registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.REGISTRY_URL }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push image to docker registry
+        id: build-image
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REGISTRY_GROUP: gnoswap
+          REGISTRY_SERVICE: grc20-register
+          IMAGE_TAG: main
+        run: |
+          # Build docker images
+          docker build -t $REGISTRY_URL/$REGISTRY_GROUP/$REGISTRY_SERVICE:$IMAGE_TAG .
+          # Push images
+          docker push $REGISTRY_URL/$REGISTRY_GROUP/$REGISTRY_SERVICE:$IMAGE_TAG
+          echo "image=$REGISTRY_URL/$REGISTRY_GROUP/$REGISTRY_SERVICE:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Redeploy service
+        uses: actions-hub/kubectl@master
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG_DEV }}
+          KUBE_DEPLOYMENT_NAME: grc20-register
+          KUBE_NAMESPACE: dev-gno
+        with:
+          args: rollout restart deployment/${{ env.KUBE_DEPLOYMENT_NAME }} -n ${{ env.KUBE_NAMESPACE }}
