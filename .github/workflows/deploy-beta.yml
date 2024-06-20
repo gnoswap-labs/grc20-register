@@ -1,0 +1,51 @@
+name: Deploy by create tag
+
+on:
+  push:
+    tags:
+      - '*-beta'
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: development
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Login to docker registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.REGISTRY_URL }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push image to docker registry
+        id: build-image
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REGISTRY_GROUP: gnoswap
+          REGISTRY_SERVICE: grc20-register
+          IMAGE_TAG: ${{ github.ref_name }}
+        run: |
+          # Build docker images
+          docker build -t $REGISTRY_URL/$REGISTRY_GROUP/$REGISTRY_SERVICE:$IMAGE_TAG .
+          docker build -t $REGISTRY_URL/$REGISTRY_GROUP/$REGISTRY_SERVICE:latest .
+          # Push images
+          docker push $REGISTRY_URL/$REGISTRY_GROUP/$REGISTRY_SERVICE:$IMAGE_TAG
+          docker push $REGISTRY_URL/$REGISTRY_GROUP/$REGISTRY_SERVICE:latest
+          echo "image=$REGISTRY_URL/$REGISTRY_GROUP/$REGISTRY_SERVICE:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Redeploy service
+        uses: actions-hub/kubectl@master
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REGISTRY_GROUP: gnoswap
+          IMAGE_TAG: ${{ github.ref_name }}
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG_BETA }}
+          KUBE_DEPLOYMENT_NAME: grc20-register
+          KUBE_NAMESPACE: beta-gno
+        with:
+          args: set image deployment/${{ env.KUBE_DEPLOYMENT_NAME }} container-0=${{ env.REGISTRY_URL }}/${{ env.REGISTRY_GROUP }}/${{ env.KUBE_DEPLOYMENT_NAME }}:${{ env.IMAGE_TAG }} -n ${{ env.KUBE_NAMESPACE }}
