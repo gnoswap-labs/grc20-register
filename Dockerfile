@@ -7,6 +7,6 @@ FROM scratch
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
-COPY --from=builder ["/app/grc20_register", "/app/.env", "/"]
+COPY --from=builder ["/app/grc20_register", "/"]
 
 ENTRYPOINT ["/grc20_register", "start"]
