@@ -222,7 +222,7 @@ func (f *Fetcher) FetchChainData(ctx context.Context) error {
 									byteMsg := amino.MustMarshalJSON(msg)
 									jsonMsg := gjson.ParseBytes(byteMsg)
 
-									pkgPath := jsonMsg.Get("package.Path").String()
+									pkgPath := jsonMsg.Get("package.path").String()
 
 									// get public functions
 									funcsResponse, err := f.client.GetAbciQuery("vm/qfuncs", []byte(pkgPath))

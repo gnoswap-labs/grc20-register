@@ -5,9 +5,11 @@ import (
 
 	pusers "gno.land/p/demo/users"
 
-	pl "gno.land/r/demo/pool"
-	rr "gno.land/r/demo/router"
-	sr "gno.land/r/demo/staker"
+	pl "gno.land/r/gnoswap/pool"
+	rr "gno.land/r/gnoswap/router"
+	sr "gno.land/r/gnoswap/staker"
+	pf "gno.land/r/gnoswap/protocol_fee"
+	cp "gno.land/r/gnoswap/community_pool"
 )
 
 type NewToken struct{}
@@ -32,4 +34,6 @@ func init() {
 	pl.RegisterGRC20Interface("pkgPath", NewToken{})
 	rr.RegisterGRC20Interface("pkgPath", NewToken{})
 	sr.RegisterGRC20Interface("pkgPath", NewToken{})
+	pf.RegisterGRC20Interface("pkgPath", NewToken{})
+	cp.RegisterGRC20Interface("pkgPath", NewToken{})
 }
