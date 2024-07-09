@@ -1,4 +1,4 @@
-FROM golang:1.21-bullseye AS builder
+FROM golang:1.22-bullseye AS builder
 WORKDIR /app
 COPY . /app
 RUN CGO_ENABLED=0 go build -o grc20_register ./cmd
