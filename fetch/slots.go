@@ -8,8 +8,8 @@ import (
 // chunk represents a single blockchain
 // data range
 type chunk struct {
-	blocks  []*types.Block
-	results [][]*types.TxResult // summarized results
+	blocks  map[int64]*types.Block
+	results map[int64][]*types.TxResult // summarized results
 }
 
 // slot is a single chunk slot

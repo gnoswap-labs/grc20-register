@@ -61,10 +61,11 @@ func handleChunk(
 // getBlocksFromBatch gets the blocks using batch requests.
 // In case of encountering an error during fetching (remote temporarily closed, batch error...),
 // the fetch is attempted again using sequential block fetches
-func getBlocksFromBatch(chunkRange chunkRange, client Client) ([]*types.Block, error) {
+func getBlocksFromBatch(chunkRange chunkRange, client Client) (map[int64]*types.Block, error) {
 	var (
 		batch         = client.CreateBatch()
-		fetchedBlocks = make([]*types.Block, 0)
+		fetchedBlocks = make(map[int64]*types.Block)
+		// fetchedBlocks = make([]*types.Block, 0)
 	)
 
 	// Add block requests to the batch
@@ -93,17 +94,19 @@ func getBlocksFromBatch(chunkRange chunkRange, client Client) ([]*types.Block, e
 		}
 
 		// Save block
-		fetchedBlocks = append(fetchedBlocks, block.Block)
+		// fetchedBlocks = append(fetchedBlocks, block.Block)
+		fetchedBlocks[block.Block.Height] = block.Block
 	}
 
 	return fetchedBlocks, nil
 }
 
 // getBlocksSequentially attempts to fetch blocks from the client, using sequential requests
-func getBlocksSequentially(chunkRange chunkRange, client Client) ([]*types.Block, error) {
+func getBlocksSequentially(chunkRange chunkRange, client Client) (map[int64]*types.Block, error) {
 	var (
 		errs   = make([]error, 0)
-		blocks = make([]*types.Block, 0)
+		blocks = make(map[int64]*types.Block)
+		// blocks = make([]*types.Block, 0)
 	)
 
 	for blockNum := chunkRange.from; blockNum <= chunkRange.to; blockNum++ {
@@ -115,7 +118,8 @@ func getBlocksSequentially(chunkRange chunkRange, client Client) ([]*types.Block
 			continue
 		}
 
-		blocks = append(blocks, block.Block)
+		// blocks = append(blocks, block.Block)
+		blocks[block.Block.Height] = block.Block
 	}
 
 	return blocks, errors.Join(errs...)
@@ -124,10 +128,11 @@ func getBlocksSequentially(chunkRange chunkRange, client Client) ([]*types.Block
 // getTxResultFromBatch gets the tx results using batch requests.
 // In case of encountering an error during fetching (remote temporarily closed, batch error...),
 // the fetch is attempted again using sequential tx result fetches
-func getTxResultFromBatch(blocks []*types.Block, client Client) ([][]*types.TxResult, error) {
+func getTxResultFromBatch(blocks map[int64]*types.Block, client Client) (map[int64][]*types.TxResult, error) {
 	var (
 		batch          = client.CreateBatch()
-		fetchedResults = make([][]*types.TxResult, len(blocks))
+		fetchedResults = make(map[int64][]*types.TxResult, len(blocks))
+		// fetchedResults = make([][]*types.TxResult, len(blocks))
 	)
 
 	// Create the results request batch
@@ -161,14 +166,13 @@ func getTxResultFromBatch(blocks []*types.Block, client Client) ([][]*types.TxRe
 		return getTxResultsSequentially(blocks, client)
 	}
 
-	indexOfBlockHeight := make(map[int64]int, len(blocks))
-
-	for index, block := range blocks {
-		indexOfBlockHeight[block.Height] = index
-	}
+	// indexOfBlockHeight := make(map[int64]int, len(blocks))
+	// for index, block := range blocks {
+	// 	indexOfBlockHeight[block.Height] = index
+	// }
 
 	// Extract the results
-	for resultsIndex, resultsRaw := range blockResultsRaw {
+	for _, resultsRaw := range blockResultsRaw {
 		results, ok := resultsRaw.(*core_types.ResultBlockResults)
 		if !ok {
 			return nil, errors.New("unable to cast batch result into ResultBlockResults")
@@ -176,11 +180,11 @@ func getTxResultFromBatch(blocks []*types.Block, client Client) ([][]*types.TxRe
 
 		height := results.Height
 		deliverTxs := results.Results.DeliverTxs
-		blockIndex := indexOfBlockHeight[height]
+		// blockIndex := indexOfBlockHeight[height]
 
-		txResults := make([]*types.TxResult, blocks[blockIndex].NumTxs)
+		txResults := make([]*types.TxResult, blocks[height].NumTxs)
 
-		for txIndex, tx := range blocks[blockIndex].Txs {
+		for txIndex, tx := range blocks[height].Txs {
 			result := &types.TxResult{
 				Height:   height,
 				Index:    uint32(txIndex),
@@ -191,17 +195,19 @@ func getTxResultFromBatch(blocks []*types.Block, client Client) ([][]*types.TxRe
 			txResults[txIndex] = result
 		}
 
-		fetchedResults[resultsIndex] = txResults
+		fetchedResults[height] = txResults
+		// fetchedResults[resultsIndex] = txResults
 	}
 
 	return fetchedResults, nil
 }
 
 // getTxResultsSequentially attempts to fetch tx results from the client, using sequential requests
-func getTxResultsSequentially(blocks []*types.Block, client Client) ([][]*types.TxResult, error) {
+func getTxResultsSequentially(blocks map[int64]*types.Block, client Client) (map[int64][]*types.TxResult, error) {
 	var (
 		errs    = make([]error, 0)
-		results = make([][]*types.TxResult, len(blocks))
+		results = make(map[int64][]*types.TxResult, len(blocks))
+		// results = make([][]*types.TxResult, len(blocks))
 	)
 
 	for index, block := range blocks {
