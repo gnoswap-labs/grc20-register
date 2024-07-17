@@ -2,7 +2,7 @@
 .DS_Store
 
 # Data Leftovers
-indexer-db/*
+register-db/*
 
 # Editor Leftovers
 .vscode
@@ -16,3 +16,6 @@ build/*
 
 # Configuration files
 *.toml
+
+# Env
+.env

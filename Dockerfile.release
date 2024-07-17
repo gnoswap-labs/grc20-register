@@ -1,4 +1,4 @@
 FROM scratch
-COPY tx-indexer /
-ENTRYPOINT [ "/tx-indexer" ]
+COPY grc20-register /
+ENTRYPOINT [ "/grc20-register" ]
 CMD [ "start" ]
