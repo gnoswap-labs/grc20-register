@@ -10,7 +10,7 @@ import (
 	"github.com/gnolang/gno/tm2/pkg/bft/types"
 	"go.uber.org/multierr"
 
-	storageErrors "github.com/gnoswap-labs/grc20-register/storage/errors"
+	storageErrors "github.com/gnolang/tx-indexer/storage/errors"
 )
 
 const (
@@ -261,17 +261,12 @@ type PebbleTxIter struct {
 func (pi *PebbleTxIter) Next() bool {
 	for {
 		if !pi.init {
-			pi.init = true
 			if !pi.i.First() {
 				return false
 			}
-		}
 
-		if !pi.i.Valid() {
-			return false
-		}
-
-		if !pi.i.Next() {
+			pi.init = true
+		} else if !pi.i.Next() {
 			return false
 		}
 

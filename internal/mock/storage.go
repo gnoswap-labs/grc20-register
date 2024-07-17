@@ -3,7 +3,7 @@ package mock
 import (
 	"github.com/gnolang/gno/tm2/pkg/bft/types"
 
-	"github.com/gnoswap-labs/grc20-register/storage"
+	"github.com/gnolang/tx-indexer/storage"
 )
 
 var _ storage.Storage = &Storage{}

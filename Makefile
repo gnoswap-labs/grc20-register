@@ -2,8 +2,8 @@ all: build
 
 .PHONY: build
 build:
-	@echo "Building grc20-register binary"
-	go build -o build/grc20-register ./cmd
+	@echo "Building indexer binary"
+	go build -o build/tx-indexer ./cmd
 
 .PHONY: lint
 lint:

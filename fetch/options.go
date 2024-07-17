@@ -1,8 +1,6 @@
 package fetch
 
-import (
-	"go.uber.org/zap"
-)
+import "go.uber.org/zap"
 
 type Option func(f *Fetcher)
 

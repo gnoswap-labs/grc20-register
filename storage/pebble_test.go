@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	storageErrors "github.com/gnoswap-labs/grc20-register/storage/errors"
+	storageErrors "github.com/gnolang/tx-indexer/storage/errors"
 )
 
 func TestStorage_New(t *testing.T) {
@@ -145,7 +145,7 @@ func TestStorageIters(t *testing.T) {
 		txCount++
 	}
 
-	require.Equal(t, 2, txCount)
+	require.Equal(t, 3, txCount)
 
 	defer require.NoError(t, it.Close())
 

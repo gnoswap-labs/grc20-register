@@ -8,22 +8,11 @@ import (
 	"sort"
 	"time"
 
-	"github.com/gnolang/gno/tm2/pkg/amino"
-	"github.com/gnolang/gno/tm2/pkg/std"
-	"github.com/tidwall/gjson"
-
-	_ "github.com/gnolang/gno/gno.land/pkg/sdk/vm" // unmarshal vm.m_addpkg
-	_ "github.com/gnolang/gno/tm2/pkg/sdk/bank"    // unmarshal bank.MsgSend
-
-	mapset "github.com/deckarep/golang-set"
 	queue "github.com/madz-lab/insertion-queue"
 	"go.uber.org/zap"
 
-	"github.com/gnoswap-labs/grc20-register/addpkg"
-
-	"github.com/gnoswap-labs/grc20-register/storage"
-	storageErrors "github.com/gnoswap-labs/grc20-register/storage/errors"
-	"github.com/gnoswap-labs/grc20-register/types"
+	"github.com/gnolang/tx-indexer/storage"
+	storageErrors "github.com/gnolang/tx-indexer/storage/errors"
 )
 
 const (
@@ -106,9 +95,14 @@ func (f *Fetcher) FetchChainData(ctx context.Context) error {
 		}
 
 		// Check if there is a block gap
-		if latestRemote <= latestLocal {
+		if latestRemote == latestLocal {
 			// No gap, nothing to sync
 			return nil
+		}
+
+		// Check if there is reset chains
+		if latestRemote < latestLocal {
+			return fmt.Errorf("reset chain: latestRemote(%d) < latestLocal(%d)", latestRemote, latestLocal)
 		}
 
 		gaps := f.chunkBuffer.reserveChunkRanges(
@@ -192,68 +186,6 @@ func (f *Fetcher) FetchChainData(ctx context.Context) error {
 
 				// Save the fetched data
 				for blockIndex, block := range item.chunk.blocks {
-					// START REGISTER
-					txNum := len(block.Data.Txs)
-					blockSuccess := f.isBlockSuccess(block.Height)
-
-					// NOTE
-					// GNO DATA STRUCTURE == 1 BLOCK : n TXS : n MSGS
-					// 1. iterate txs
-					// 2. iterate msgs in single tx
-					// 3. check if msg is add_package
-					// 4. check if package is type of grc20
-					// 5. register grc20 token
-					if txNum > 0 && blockSuccess {
-						// iterate txs
-						for _, tx := range block.Data.Txs {
-							stdTx := std.Tx{}
-							amino.MustUnmarshal(tx, &stdTx)
-
-							// iterate msgs in single tx
-							for _, msg := range stdTx.Msgs {
-								_type := msg.Type()
-								// bank.MsgSend == send
-								// vm.m_addpkg == add_package
-								// vm.m_call == exec
-								// vm.m_run == run
-
-								// package deploy success
-								if _type == "add_package" {
-									byteMsg := amino.MustMarshalJSON(msg)
-									jsonMsg := gjson.ParseBytes(byteMsg)
-
-									pkgPath := jsonMsg.Get("package.path").String()
-
-									// get public functions
-									funcsResponse, err := f.client.GetAbciQuery("vm/qfuncs", []byte(pkgPath))
-									if err != nil {
-										f.logger.Error("unable to fetch package info", zap.Error(err))
-									}
-									funcListStr := string(funcsResponse.Response.ResponseBase.Data)
-									funcList := gjson.Parse(funcListStr).Array()
-
-									var funcNameList []string
-									for _, funcInfo := range funcList {
-										funcName := funcInfo.Get("FuncName").String()
-										funcNameList = append(funcNameList, funcName)
-									}
-
-									// isGRC20
-									if isGRC20(funcNameList) {
-										// register
-										err := addpkg.RegisterGrc20Token(pkgPath)
-										if err != nil {
-											f.logger.Error("Failed to register grc20 token", zap.String("pkgPath", pkgPath), zap.Error(err))
-										} else {
-											f.logger.Info("Registered grc20 token", zap.String("pkgPath", pkgPath))
-										}
-									}
-								}
-							}
-						}
-					}
-					// END REGISTER
-
 					if saveErr := wb.SetBlock(block); saveErr != nil {
 						// This is a design choice that really highlights the strain
 						// of keeping legacy testnets running. Current TM2 testnets
@@ -284,13 +216,8 @@ func (f *Fetcher) FetchChainData(ctx context.Context) error {
 						)
 					}
 
-					// Alert any listeners of a new saved block
-					event := &types.NewBlock{
-						Block:   block,
-						Results: txResults,
-					}
-
-					f.events.SignalEvent(event)
+					f.logger.Info("DEBUG_BLOCK", zap.Any("block", block))
+					f.logger.Info("DEBUG_TX_RESULTS", zap.Any("txResults", txResults))
 				}
 
 				f.logger.Info(
@@ -314,38 +241,4 @@ func (f *Fetcher) FetchChainData(ctx context.Context) error {
 			}
 		}
 	}
-}
-
-// isBlockSuccess reports whether the given height block was successfully committed
-func (f *Fetcher) isBlockSuccess(height int64) bool {
-	res, err := f.client.GetBlockResults(uint64(height))
-	if err != nil {
-		f.logger.Error("unable to fetch block result", zap.Error(err))
-		return false
-	}
-
-	// if no txs, return true
-	if len(res.Results.DeliverTxs) == 0 {
-		return true
-	}
-
-	return nil == res.Results.DeliverTxs[0].Error
-}
-
-func isGRC20(mainSlice []string) bool {
-	// REF: https://github.com/gnolang/gno/blob/0f2e7551b43c18d27b63cbbadecf07ee48f185f9/examples/gno.land/p/demo/grc/grc20/imustgrc20.gno#L13-L21
-	grc20List := []string{"TotalSupply", "BalanceOf", "Transfer", "Allowance", "Approve", "TransferFrom"}
-
-	mainSet := sliceToSet(mainSlice)
-	grc20Set := sliceToSet(grc20List)
-
-	return grc20Set.IsSubset(mainSet)
-}
-
-func sliceToSet(mySlice []string) mapset.Set {
-	mySet := mapset.NewSet()
-	for _, ele := range mySlice {
-		mySet.Add(ele)
-	}
-	return mySet
 }

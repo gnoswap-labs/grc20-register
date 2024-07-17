@@ -5,61 +5,49 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/peterbourgon/ff/v3/ffcli"
 	"go.uber.org/zap"
 
-	"github.com/gnoswap-labs/grc20-register/client"
-	"github.com/gnoswap-labs/grc20-register/config"
-	"github.com/gnoswap-labs/grc20-register/events"
-	"github.com/gnoswap-labs/grc20-register/fetch"
-	"github.com/gnoswap-labs/grc20-register/storage"
+	"github.com/gnolang/tx-indexer/client"
+	"github.com/gnolang/tx-indexer/events"
+	"github.com/gnolang/tx-indexer/fetch"
+	"github.com/gnolang/tx-indexer/serve"
+	"github.com/gnolang/tx-indexer/serve/graph"
+	"github.com/gnolang/tx-indexer/storage"
 )
 
 const (
-	configFlagName = "config"
-	// envPrefix      = "GNO_REGISTER"
+	defaultRemote = "http://127.0.0.1:26657"
+	defaultDBPath = "indexer-db"
 )
 
-const (
-	defaultRemote  = "http://127.0.0.1:26657"
-	defaultChainId = "dev"
-
-	defaultGasFee    = "1000000ugnot"
-	defaultGasWanted = "10000000"
-
-	defaultDBPath = "register-db"
-)
-
-// addPkgCfg wraps the addPkg
-// root command configuration
-type addPkgCfg struct {
-	config *config.Config
-
-	remote    string
-	chainId   string
-	gasFee    string
-	gasWanted string
-
-	dbPath   string
-	logLevel string
+type startCfg struct {
+	listenAddress string
+	remote        string
+	dbPath        string
+	logLevel      string
 
 	maxSlots     int
 	maxChunkSize int64
+
+	rateLimit int
 }
 
-// newStartCmd creates the register start command
+// newStartCmd creates the indexer start command
 func newStartCmd() *ffcli.Command {
-	cfg := &addPkgCfg{}
+	cfg := &startCfg{}
 
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
-	cfg.registerRootFlags(fs)
+	cfg.registerFlags(fs)
 
 	return &ffcli.Command{
 		Name:       "start",
 		ShortUsage: "start [flags]",
-		ShortHelp:  "Starts the grc20 register service",
-		LongHelp:   "Starts the grc20 register service, which includes the fetcher",
+		ShortHelp:  "Starts the indexer service",
+		LongHelp:   "Starts the indexer service, which includes the fetcher and JSON-RPC server",
 		FlagSet:    fs,
 		Exec: func(ctx context.Context, _ []string) error {
 			return cfg.exec(ctx)
@@ -67,21 +55,27 @@ func newStartCmd() *ffcli.Command {
 	}
 }
 
-// registerFlags registers the register start command flags
-func (c *addPkgCfg) registerRootFlags(fs *flag.FlagSet) {
-	// Config flag
-	fs.String(
-		configFlagName,
-		"",
-		"the path to the command configuration file [TOML]",
+// registerFlags registers the indexer start command flags
+func (c *startCfg) registerFlags(fs *flag.FlagSet) {
+	fs.StringVar(
+		&c.listenAddress,
+		"listen-address",
+		serve.DefaultListenAddress,
+		"the IP:PORT URL for the indexer JSON-RPC server",
 	)
 
-	// Top level flags
+	fs.StringVar(
+		&c.remote,
+		"remote",
+		defaultRemote,
+		"the JSON-RPC URL of the Gno chain",
+	)
+
 	fs.StringVar(
 		&c.dbPath,
 		"db-path",
 		defaultDBPath,
-		"the absolute path for the register DB (embedded)",
+		"the absolute path for the indexer DB (embedded)",
 	)
 
 	fs.StringVar(
@@ -105,37 +99,16 @@ func (c *addPkgCfg) registerRootFlags(fs *flag.FlagSet) {
 		"the range for fetching blockchain data by a single worker",
 	)
 
-	fs.StringVar(
-		&c.gasFee,
-		"gas-fee",
-		defaultGasFee,
-		"the static gas fee for the transaction. Format: <AMOUNT>ugnot",
-	)
-
-	fs.StringVar(
-		&c.gasWanted,
-		"gas-wanted",
-		defaultGasWanted,
-		"the static gas wanted for the transaction. Format: <AMOUNT>ugnot",
-	)
-
-	fs.StringVar(
-		&c.remote,
-		"remote",
-		defaultRemote,
-		"the JSON-RPC URL of the Gno chain",
-	)
-
-	fs.StringVar(
-		&c.chainId,
-		"chain-id",
-		defaultChainId,
-		"the chainId of the Gno chain",
+	fs.IntVar(
+		&c.rateLimit,
+		"http-rate-limit",
+		0,
+		"the maximum HTTP requests allowed per minute per IP, unlimited by default",
 	)
 }
 
-// exec executes the register start command
-func (c *addPkgCfg) exec(ctx context.Context) error {
+// exec executes the indexer start command
+func (c *startCfg) exec(ctx context.Context) error {
 	// Parse the log level
 	logLevel, err := zap.ParseAtomicLevel(c.logLevel)
 	if err != nil {
@@ -158,8 +131,8 @@ func (c *addPkgCfg) exec(ctx context.Context) error {
 	}
 
 	defer func() {
-		if err := db.Close(); err != nil {
-			logger.Error("unable to gracefully close DB", zap.Error(err))
+		if closeErr := db.Close(); closeErr != nil {
+			logger.Error("unable to gracefully close DB", zap.Error(closeErr))
 		}
 	}()
 
@@ -184,15 +157,78 @@ func (c *addPkgCfg) exec(ctx context.Context) error {
 		fetch.WithMaxChunkSize(c.maxChunkSize),
 	)
 
+	// Create the JSON-RPC service
+	j := setupJSONRPC(
+		db,
+		em,
+		logger,
+	)
+
+	mux := chi.NewMux()
+
+	mux.Use(NewCORSHandler())
+
+	mux = j.SetupRoutes(mux)
+	mux = graph.Setup(db, em, mux)
+
+	// Create the HTTP server
+	hs := serve.NewHTTPServer(mux, c.listenAddress, logger.Named("http-server"))
+
 	// Create a new waiter
 	w := newWaiter(ctx)
 
 	// Add the fetcher service
 	w.add(f.FetchChainData)
 
+	// Add the JSON-RPC service
+	w.add(hs.Serve)
+
 	// Wait for the services to stop
 	return errors.Join(
 		w.wait(),
 		logger.Sync(),
 	)
+}
+
+// setupJSONRPC sets up the JSONRPC instance
+func setupJSONRPC(
+	db *storage.Pebble,
+	em *events.Manager,
+	logger *zap.Logger,
+) *serve.JSONRPC {
+	j := serve.NewJSONRPC(
+		em,
+		serve.WithLogger(
+			logger.Named("json-rpc"),
+		),
+	)
+
+	// Transaction handlers
+	j.RegisterTxEndpoints(db)
+
+	// Block handlers
+	j.RegisterBlockEndpoints(db)
+
+	// Sub handlers
+	j.RegisterSubEndpoints(db)
+
+	return j
+}
+
+func NewCORSHandler() func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(
+			func(writer http.ResponseWriter, request *http.Request) {
+				allowedHeaders := "*"
+
+				if origin := request.Header.Get("Origin"); origin != "" {
+					writer.Header().Set("Access-Control-Allow-Origin", "*")
+					writer.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+					writer.Header().Set("Access-Control-Allow-Headers", allowedHeaders)
+				}
+
+				next.ServeHTTP(writer, request)
+			},
+		)
+	}
 }

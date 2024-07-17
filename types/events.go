@@ -2,11 +2,13 @@ package types
 
 import (
 	"github.com/gnolang/gno/tm2/pkg/bft/types"
-	"github.com/gnoswap-labs/grc20-register/events"
+	"github.com/gnolang/tx-indexer/events"
 )
 
 // NewBlockEvent is the event for when new blocks appear
-var NewBlockEvent events.Type = "newHeads"
+var (
+	NewBlockEvent events.Type = "newHeads"
+)
 
 type NewBlock struct {
 	Block   *types.Block

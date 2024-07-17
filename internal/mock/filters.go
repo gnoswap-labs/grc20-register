@@ -1,7 +1,7 @@
 package mock
 
 import (
-	"github.com/gnoswap-labs/grc20-register/events"
+	"github.com/gnolang/tx-indexer/events"
 )
 
 type (

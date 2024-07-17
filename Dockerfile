@@ -1,12 +1,21 @@
-FROM golang:1.22-bullseye AS builder
-WORKDIR /app
+#===============
+# Stage 1: Build
+#===============
+
+FROM golang:1.22-alpine as builder
+
 COPY . /app
-RUN CGO_ENABLED=0 go build -o grc20_register ./cmd
 
-FROM scratch
-COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+WORKDIR /app
 
-COPY --from=builder ["/app/grc20_register", "/app/.env", "/"]
+RUN go build -o indexer ./cmd
 
-ENTRYPOINT ["/grc20_register", "start"]
+#===============
+# Stage 2: Run
+#===============
+
+FROM alpine
+
+COPY --from=builder /app/indexer /usr/local/bin/indexer
+
+ENTRYPOINT [ "/usr/local/bin/indexer" ]

@@ -3,14 +3,10 @@ package client
 import (
 	"fmt"
 
-	"github.com/gnolang/gno/tm2/pkg/amino"
-	"github.com/gnolang/gno/tm2/pkg/crypto"
-	"github.com/gnolang/gno/tm2/pkg/std"
-
 	rpcClient "github.com/gnolang/gno/tm2/pkg/bft/rpc/client"
 	core_types "github.com/gnolang/gno/tm2/pkg/bft/rpc/core/types"
 
-	clientTypes "github.com/gnoswap-labs/grc20-register/client/types"
+	clientTypes "github.com/gnolang/tx-indexer/client/types"
 )
 
 // Client is the TM2 HTTP client
@@ -66,35 +62,4 @@ func (c *Client) GetBlockResults(blockNum uint64) (*core_types.ResultBlockResult
 	}
 
 	return results, nil
-}
-
-// Below 3 needed for grc20 register
-func (c *Client) GetAbciQuery(path string, data []byte) (*core_types.ResultABCIQuery, error) {
-	return c.client.ABCIQuery(path, data)
-}
-
-func (c *Client) GetAccount(address crypto.Address) (std.Account, error) {
-	path := fmt.Sprintf("auth/accounts/%s", address.String())
-
-	queryResponse, err := c.client.ABCIQuery(path, []byte{})
-	if err != nil {
-		return nil, fmt.Errorf("unable to execute ABCI query, %w", err)
-	}
-
-	var queryData struct{ BaseAccount std.BaseAccount }
-
-	if err := amino.UnmarshalJSON(queryResponse.Response.Data, &queryData); err != nil {
-		return nil, err
-	}
-
-	return &queryData.BaseAccount, nil
-}
-
-func (c *Client) SendTransactionCommit(tx *std.Tx) (*core_types.ResultBroadcastTxCommit, error) {
-	aminoTx, err := amino.Marshal(tx)
-	if err != nil {
-		return nil, fmt.Errorf("unable to marshal transaction, %w", err)
-	}
-
-	return c.client.BroadcastTxCommit(aminoTx)
 }

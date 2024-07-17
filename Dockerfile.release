@@ -1,0 +1,4 @@
+FROM scratch
+COPY tx-indexer /
+ENTRYPOINT [ "/tx-indexer" ]
+CMD [ "start" ]

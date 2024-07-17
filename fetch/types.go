@@ -3,8 +3,8 @@ package fetch
 import (
 	core_types "github.com/gnolang/gno/tm2/pkg/bft/rpc/core/types"
 
-	clientTypes "github.com/gnoswap-labs/grc20-register/client/types"
-	"github.com/gnoswap-labs/grc20-register/events"
+	clientTypes "github.com/gnolang/tx-indexer/client/types"
+	"github.com/gnolang/tx-indexer/events"
 )
 
 // Client defines the interface for the node (client) communication
@@ -21,9 +21,6 @@ type Client interface {
 
 	// CreateBatch creates a new client batch
 	CreateBatch() clientTypes.Batch
-
-	// GetAbciQuery returns the result of an ABCI query
-	GetAbciQuery(path string, data []byte) (*core_types.ResultABCIQuery, error)
 }
 
 // Events is the events API
