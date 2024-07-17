@@ -7,19 +7,22 @@ import (
 	"sort"
 	"time"
 
-	queue "github.com/madz-lab/insertion-queue"
-	"github.com/tidwall/gjson"
-	"go.uber.org/zap"
-
-	mapset "github.com/deckarep/golang-set"
-
 	"github.com/gnolang/gno/tm2/pkg/amino"
 	"github.com/gnolang/gno/tm2/pkg/std"
-	"github.com/gnolang/tx-indexer/addpkg"
-	"github.com/gnolang/tx-indexer/storage"
-	storageErrors "github.com/gnolang/tx-indexer/storage/errors"
+	"github.com/tidwall/gjson"
 
-	rpcClient "github.com/gnolang/gno/tm2/pkg/bft/rpc/client"
+	_ "github.com/gnolang/gno/gno.land/pkg/sdk/vm" // unmarshal vm.m_addpkg
+	_ "github.com/gnolang/gno/tm2/pkg/sdk/bank"    // unmarshal bank.MsgSend
+
+	mapset "github.com/deckarep/golang-set"
+	queue "github.com/madz-lab/insertion-queue"
+	"go.uber.org/zap"
+
+	"github.com/gnoswap-labs/grc20-register/addpkg"
+	"github.com/gnoswap-labs/grc20-register/storage"
+	storageErrors "github.com/gnoswap-labs/grc20-register/storage/errors"
+
+	_ "github.com/joho/godotenv/autoload"
 )
 
 const (
@@ -30,10 +33,9 @@ const (
 // Fetcher is an instance of the block indexer
 // fetcher
 type Fetcher struct {
-	storage   storage.Storage
-	client    Client
-	rpcClient rpcClient.RPCClient // the rpc client
-	events    Events
+	storage storage.Storage
+	client  Client
+	events  Events
 
 	logger      *zap.Logger
 	chunkBuffer *slots
@@ -49,14 +51,12 @@ type Fetcher struct {
 func New(
 	storage storage.Storage,
 	client Client,
-	rpcClient rpcClient.RPCClient,
 	events Events,
 	opts ...Option,
 ) *Fetcher {
 	f := &Fetcher{
 		storage:       storage,
 		client:        client,
-		rpcClient:     rpcClient,
 		events:        events,
 		queryInterval: 1 * time.Second,
 		logger:        zap.NewNop(),
@@ -105,14 +105,9 @@ func (f *Fetcher) FetchChainData(ctx context.Context) error {
 		}
 
 		// Check if there is a block gap
-		if latestRemote == latestLocal {
+		if latestRemote <= latestLocal {
 			// No gap, nothing to sync
 			return nil
-		}
-
-		// Check if there is reset chains
-		if latestRemote < latestLocal {
-			return fmt.Errorf("reset chain: latestRemote(%d) < latestLocal(%d)", latestRemote, latestLocal)
 		}
 
 		gaps := f.chunkBuffer.reserveChunkRanges(
@@ -195,7 +190,7 @@ func (f *Fetcher) FetchChainData(ctx context.Context) error {
 				wb := f.storage.WriteBatch()
 
 				// Save the fetched data
-				for _, block := range item.chunk.blocks {
+				for blockIndex, block := range item.chunk.blocks {
 					if saveErr := wb.SetBlock(block); saveErr != nil {
 						// This is a design choice that really highlights the strain
 						// of keeping legacy testnets running. Current TM2 testnets
@@ -207,69 +202,73 @@ func (f *Fetcher) FetchChainData(ctx context.Context) error {
 						continue
 					}
 
-					f.logger.Debug("Added block data to batch", zap.Int64("number", block.Height))
+					// get block results
+					txResutls := item.chunk.results[blockIndex]
 
-					// Get block results
-					txResults := item.chunk.results[block.Height]
+					f.logger.Info("DEBUG", zap.Any("block", block))
+					println()
+					f.logger.Info("DEBUG", zap.Any("result", txResutls))
+					panic("DEBUG")
 
-					// Save the fetched transaction results
-					for _, txResult := range txResults {
-						if err := wb.SetTx(txResult); err != nil {
-							f.logger.Error("unable to  save tx", zap.String("err", err.Error()))
-							continue
-						}
+					// START REGISTER
+					txNum := len(block.Data.Txs)
+					blockSuccess := f.isBlockSuccess(block.Height)
 
-						// START REGISTER
-						success := txResult.Response.Error == nil
-						if success {
-							// ITER MSG
-							for _, tx := range block.Data.Txs {
-								stdTx := std.Tx{}
-								amino.MustUnmarshal(tx, &stdTx)
+					// NOTE
+					// GNO DATA STRUCTURE == 1 BLOCK : n TXS : n MSGS
+					// 1. iterate txs
+					// 2. iterate msgs in single tx
+					// 3. check if msg is add_package
+					// 4. check if package is type of grc20
+					// 5. register grc20 token
+					if txNum > 0 && blockSuccess {
+						// iterate txs
+						for _, tx := range block.Data.Txs {
+							stdTx := std.Tx{}
+							amino.MustUnmarshal(tx, &stdTx)
 
-								// iterate msgs in single tx
-								for _, msg := range stdTx.GetMsgs() {
-									msgType := msg.Type()
-									// bank.MsgSend == send
-									// vm.m_addpkg == add_package
-									// vm.m_call == exec
-									// vm.m_run == run
+							// iterate msgs in single tx
+							for _, msg := range stdTx.Msgs {
+								_type := msg.Type()
+								// bank.MsgSend == send
+								// vm.m_addpkg == add_package
+								// vm.m_call == exec
+								// vm.m_run == run
 
-									// package deploy success
-									if msgType == "add_package" {
-										byteMsg := amino.MustMarshalJSON(msg)
-										jsonMsg := gjson.ParseBytes(byteMsg)
+								// package deploy success
+								if _type == "add_package" {
+									byteMsg := amino.MustMarshalJSON(msg)
+									jsonMsg := gjson.ParseBytes(byteMsg)
 
-										pkgPath := jsonMsg.Get("package.path").String()
+									pkgPath := jsonMsg.Get("package.path").String()
 
-										// get public functions
-										funcsResponse, err := f.rpcClient.ABCIQuery("vm/qfuncs", []byte(pkgPath))
-										if err != nil {
-											f.logger.Error("unable to fetch package info", zap.Error(err))
-										}
-										funcListStr := string(funcsResponse.Response.ResponseBase.Data)
-										funcList := gjson.Parse(funcListStr).Array()
+									// get public functions
+									funcsResponse, err := f.client.GetAbciQuery("vm/qfuncs", []byte(pkgPath))
+									if err != nil {
+										f.logger.Error("unable to fetch package info", zap.Error(err))
+									}
+									funcListStr := string(funcsResponse.Response.ResponseBase.Data)
+									funcList := gjson.Parse(funcListStr).Array()
 
-										var funcNameList []string
-										for _, funcInfo := range funcList {
-											funcName := funcInfo.Get("FuncName").String()
-											funcNameList = append(funcNameList, funcName)
-										}
+									var funcNameList []string
+									for _, funcInfo := range funcList {
+										funcName := funcInfo.Get("FuncName").String()
+										funcNameList = append(funcNameList, funcName)
+									}
 
-										// isGRC20
-										if isGRC20(funcNameList) {
-											if err := addpkg.RegisterGrc20Token(pkgPath); err != nil {
-												f.logger.Error("unable to register grc20 token", zap.Error(err))
-											} else {
-												f.logger.Info("registered grc20 token", zap.String("pkgPath", pkgPath))
-											}
+									// isGRC20
+									if isGRC20(funcNameList) {
+										if err := addpkg.RegisterGrc20Token(pkgPath); err != nil {
+											f.logger.Error("unable to register grc20 token", zap.Error(err))
+										} else {
+											f.logger.Info("registered grc20 token", zap.String("pkgPath", pkgPath))
 										}
 									}
 								}
 							}
 						}
-
 					}
+					// END REGISTER
 				}
 
 				f.logger.Info(
@@ -293,6 +292,23 @@ func (f *Fetcher) FetchChainData(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// isBlockSuccess reports whether the given height block was successfully committed
+func (f *Fetcher) isBlockSuccess(height int64) bool {
+	f.logger.Info("checking block success... ", zap.Int64("height", height))
+	res, err := f.client.GetBlockResults(uint64(height))
+	if err != nil {
+		f.logger.Error("unable to fetch block result", zap.Error(err))
+		return false
+	}
+
+	// if no txs, return true
+	if len(res.Results.DeliverTxs) == 0 {
+		return true
+	}
+
+	return nil == res.Results.DeliverTxs[0].Error
 }
 
 func isGRC20(mainSlice []string) bool {

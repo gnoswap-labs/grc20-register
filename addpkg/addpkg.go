@@ -10,11 +10,14 @@ import (
 
 	"github.com/gnolang/gno/tm2/pkg/std"
 
-	"github.com/gnoswap-labs/grc20-register/client"
-	"github.com/gnoswap-labs/grc20-register/estimate"
-	"github.com/gnoswap-labs/grc20-register/estimate/static"
-	"github.com/gnoswap-labs/grc20-register/keyring"
-	"github.com/gnoswap-labs/grc20-register/keyring/memory"
+	"github.com/gnolang/faucet/estimate"
+	"github.com/gnolang/faucet/estimate/static"
+	"github.com/gnolang/faucet/keyring"
+	"github.com/gnolang/faucet/keyring/memory"
+
+	faucetClient "github.com/gnolang/faucet/client/http"
+	rpcClient "github.com/gnolang/gno/tm2/pkg/bft/rpc/client"
+	"github.com/gnolang/tx-indexer/client"
 
 	_ "github.com/joho/godotenv/autoload"
 
@@ -33,11 +36,13 @@ var logger = slog.New(slog.NewTextHandler(os.Stdout, nil))
 
 // AddPkg
 type AddPkg struct {
-	estimator      estimate.Estimator // gas pricing estimations
-	logger         *slog.Logger       // log feedback
-	client         client.Client      // TM2 client
-	keyring        keyring.Keyring    // the faucet keyring
-	prepareTxMsgFn PrepareTxMessageFn // transaction message creator
+	estimator      estimate.Estimator  // gas pricing estimations
+	logger         *slog.Logger        // log feedback
+	client         client.Client       // TM2 client
+	faucetClient   faucetClient.Client // the faucet client
+	rpcClient      rpcClient.RPCClient // the rpc client
+	keyring        keyring.Keyring     // the faucet keyring
+	prepareTxMsgFn PrepareTxMessageFn  // transaction message creator
 }
 
 // RegisterGrc20Token registers news grc20 token to pre-defined register contract
@@ -49,7 +54,13 @@ func RegisterGrc20Token(pkgPath string) error {
 		return err
 	}
 
-	registered, err := checkIfTokenRegistered(client, pkgPath)
+	rClient, err := rpcClient.NewHTTPClient(gnoRpcUrl)
+	if err != nil {
+		logger.Error("unable to create rpc client", "error", err)
+		return err
+	}
+
+	registered, err := checkIfTokenRegistered(rClient, pkgPath)
 	if err != nil {
 		return err
 	}
@@ -78,11 +89,20 @@ func RegisterGrc20Token(pkgPath string) error {
 		gasFeeWanted,
 	)
 
+	// faucet client
+	fClient, err := faucetClient.NewClient(gnoRpcUrl)
+	if err != nil {
+		logger.Error("unable to create faucet client", "error", err)
+		return err
+	}
+
 	registerMnemonic := getEnv("GNO_REGISTER_MNEMONIC", "")
 	a := &AddPkg{
 		estimator:      estimator,
 		logger:         logger,
 		client:         *client,
+		faucetClient:   *fClient,
+		rpcClient:      *rClient,
 		keyring:        memory.New(registerMnemonic, 1),
 		prepareTxMsgFn: defaultPrepareTxMessage,
 	}
@@ -113,7 +133,7 @@ func (a *AddPkg) registerGrc20Token(pkgPath, gnoChainId string) error {
 
 	pCfg := PrepareCfg{
 		Creator: fundAccount.GetAddress(),
-		PkgName: "gnoswap_register",
+		PkgName: "token_register",
 		PkgPath: pathToRegister,
 		Files: []*std.MemFile{
 			{
@@ -140,7 +160,8 @@ func (a *AddPkg) registerGrc20Token(pkgPath, gnoChainId string) error {
 	}
 
 	// Broadcast the transaction
-	return broadcastTransaction(a.client, tx)
+	_, err = a.faucetClient.SendTransactionCommit(tx)
+	return err
 }
 
 // findFundedAccount finds an account
@@ -153,7 +174,7 @@ func (a *AddPkg) findFundedAccount() (std.Account, error) {
 
 	for _, address := range a.keyring.GetAddresses() {
 		// Fetch the account
-		account, err := a.client.GetAccount(address)
+		account, err := a.faucetClient.GetAccount(address)
 		if err != nil {
 			a.logger.Error(
 				"unable to fetch account",
@@ -202,11 +223,11 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-func checkIfTokenRegistered(client *client.Client, pkgPath string) (bool, error) {
+func checkIfTokenRegistered(client *rpcClient.RPCClient, pkgPath string) (bool, error) {
 	poolContract := getEnv("POOL_CONTRACT_PATH", "gno.land/r/gnoswap/pool")
 	payload := fmt.Sprintf("%s.GetRegisteredTokens()", poolContract)
 
-	res, err := client.GetAbciQuery("vm/qeval", []byte(payload))
+	res, err := client.ABCIQuery("vm/qeval", []byte(payload))
 	if err != nil {
 		logger.Error("unable to fetch registered tokens", "error", err)
 		return false, err

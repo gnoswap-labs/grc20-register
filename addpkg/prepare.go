@@ -3,9 +3,9 @@ package addpkg
 import (
 	"github.com/gnolang/gno/gno.land/pkg/sdk/vm"
 
+	"github.com/gnolang/faucet/estimate"
 	"github.com/gnolang/gno/tm2/pkg/crypto"
 	"github.com/gnolang/gno/tm2/pkg/std"
-	"github.com/gnoswap-labs/grc20-register/estimate"
 )
 
 // PrepareTxMessageFn is the callback method that

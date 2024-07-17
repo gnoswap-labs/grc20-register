@@ -17,16 +17,20 @@ import (
 	"github.com/gnolang/tx-indexer/serve"
 	"github.com/gnolang/tx-indexer/serve/graph"
 	"github.com/gnolang/tx-indexer/storage"
+
+	rpcClient "github.com/gnolang/gno/tm2/pkg/bft/rpc/client"
 )
 
 const (
-	defaultRemote = "http://127.0.0.1:26657"
-	defaultDBPath = "indexer-db"
+	defaultRemote  = "http://127.0.0.1:26657"
+	defaultChainId = "dev"
+	defaultDBPath  = "register-db"
 )
 
 type startCfg struct {
 	listenAddress string
 	remote        string
+	chainId       string
 	dbPath        string
 	logLevel      string
 
@@ -69,6 +73,13 @@ func (c *startCfg) registerFlags(fs *flag.FlagSet) {
 		"remote",
 		defaultRemote,
 		"the JSON-RPC URL of the Gno chain",
+	)
+
+	fs.StringVar(
+		&c.chainId,
+		"chain-id",
+		defaultChainId,
+		"the chain-id of Gno chain",
 	)
 
 	fs.StringVar(
@@ -145,10 +156,17 @@ func (c *startCfg) exec(ctx context.Context) error {
 		return fmt.Errorf("unable to create client, %w", err)
 	}
 
+	// Create a TM2 RPC client
+	rpcClient, err := rpcClient.NewHTTPClient(c.remote)
+	if err != nil {
+		return fmt.Errorf("unable to create rpc client, %w", err)
+	}
+
 	// Create the fetcher service
 	f := fetch.New(
 		db,
 		tm2Client,
+		*rpcClient,
 		em,
 		fetch.WithLogger(
 			logger.Named("fetcher"),
