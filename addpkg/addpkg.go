@@ -2,6 +2,7 @@ package addpkg
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
@@ -41,6 +42,21 @@ type AddPkg struct {
 
 // RegisterGrc20Token registers news grc20 token to pre-defined register contract
 func RegisterGrc20Token(pkgPath string) error {
+	gnoRpcUrl := getEnv("GNO_RPC_URL", "http://localhost:26657")
+	client, err := client.NewClient(gnoRpcUrl)
+	if err != nil {
+		logger.Error("unable to create TM2 client", "error", err)
+		return err
+	}
+
+	registered, err := checkIfTokenRegistered(client, pkgPath)
+	if err != nil {
+		return err
+	}
+	if registered {
+		return fmt.Errorf("token already registered: %s", pkgPath)
+	}
+
 	// load envs
 	gasFeeDenom := getEnv("GNO_GAS_FEE_DENOM", "ugnot")
 	gasFeeAmountStr := getEnv("GNO_GAS_FEE_AMOUNT", "1000000")
@@ -49,29 +65,20 @@ func RegisterGrc20Token(pkgPath string) error {
 		logger.Error("error parsing gas fee amount", "error", err.Error())
 		return err
 	}
-	gasFeeWantedStr := getEnv("GNO_GAS_WANTED", "1000000000") // current max block gas after bump PR, https://github.com/gnolang/gno/pull/2065
+	gasFeeWantedStr := getEnv("GNO_GAS_WANTED", "100000000") // current max block gas after bump PR, https://github.com/gnolang/gno/pull/2065
 	gasFeeWanted, err := strconv.ParseInt(gasFeeWantedStr, 10, 64)
 	if err != nil {
 		logger.Error("error parsing gas fee wanted", "error", err.Error())
 		return err
 	}
 
-	gnoRpcUrl := getEnv("GNO_RPC_URL", "http://localhost:26657")
-	gnoChainId := getEnv("GNO_CHAIN_ID", "dev")
-
-	registerMnemonic := getEnv("GNO_REGISTER_MNEMONIC", "")
-
 	// Create a new AddPkg instance
 	estimator := static.New(
 		std.NewCoin(gasFeeDenom, gasFeeAmount),
 		gasFeeWanted,
 	)
-	client, err := client.NewClient(gnoRpcUrl)
-	if err != nil {
-		logger.Error("unable to create TM2 client", "error", err)
-		return err
-	}
 
+	registerMnemonic := getEnv("GNO_REGISTER_MNEMONIC", "")
 	a := &AddPkg{
 		estimator:      estimator,
 		logger:         logger,
@@ -81,7 +88,8 @@ func RegisterGrc20Token(pkgPath string) error {
 	}
 
 	// Register the GRC20 token
-	return a.registerGrc20Token(pkgPath, gnoChainId)
+	gnoChainId := getEnv("GNO_CHAIN_ID", "dev")
+	return a.registerGrc20Token(pkgPath, gnoChainId) // #87 func
 }
 
 func (a *AddPkg) registerGrc20Token(pkgPath, gnoChainId string) error {
@@ -94,10 +102,19 @@ func (a *AddPkg) registerGrc20Token(pkgPath, gnoChainId string) error {
 	// Prepare the transaction
 	registerCode := strings.ReplaceAll(template, "pkgPath", pkgPath)
 
+	_removeCommon := strings.Replace(pkgPath, "gno.land/r/", "", 1)
+	pathToRegister := "gno.land/r/g1er355fkjksqpdtwmhf5penwa82p0rhqxkkyhk5/" + _removeCommon
+
+	/*
+		orig:					gno.land/r/gnoswap/gns
+		remove:				gnoswap/gns
+		toRegister: 	gno.land/r/g1er355fkjksqpdtwmhf5penwa82p0rhqxkkyhk5/gnoswap/gns
+	*/
+
 	pCfg := PrepareCfg{
 		Creator: fundAccount.GetAddress(),
-		PkgName: "token_register",
-		PkgPath: pkgPath + "_gnoswap_register",
+		PkgName: "gnoswap_register",
+		PkgPath: pathToRegister,
 		Files: []*std.MemFile{
 			{
 				Name: "register.gno",
@@ -183,4 +200,24 @@ func getEnv(key, fallback string) string {
 	}
 
 	return fallback
+}
+
+func checkIfTokenRegistered(client *client.Client, pkgPath string) (bool, error) {
+	poolContract := getEnv("POOL_CONTRACT_PATH", "gno.land/r/gnoswap/pool")
+	payload := fmt.Sprintf("%s.GetRegisteredTokens()", poolContract)
+
+	res, err := client.GetAbciQuery("vm/qeval", []byte(payload))
+	if err != nil {
+		logger.Error("unable to fetch registered tokens", "error", err)
+		return false, err
+	}
+	tokens := string(res.Response.Data)
+
+	registered := strings.Contains(tokens, pkgPath)
+	if registered {
+		logger.Info("token already registered", "pkgPath", pkgPath)
+		return true, nil
+	}
+
+	return false, nil
 }
