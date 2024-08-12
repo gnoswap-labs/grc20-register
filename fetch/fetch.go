@@ -2,8 +2,10 @@ package fetch
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"time"
 
@@ -26,6 +28,12 @@ const (
 	DefaultMaxSlots     = 100
 	DefaultMaxChunkSize = 100
 )
+
+const (
+	bankerPattern = `grc20\.NewBanker\("([^"]+)",\s*"([^"]+)",\s*(\d+)\)`
+)
+
+var bankerRegex_ = regexp.MustCompile(bankerPattern)
 
 // Fetcher is an instance of the block indexer
 // fetcher
@@ -256,8 +264,16 @@ func (f *Fetcher) FetchChainData(ctx context.Context) error {
 											funcNameList = append(funcNameList, funcName)
 										}
 
-										// isGRC20
-										if isGRC20(funcNameList) {
+										// fileContent
+										fileContents := []string{}
+										for _, file := range jsonMsg.Get("package.files").Array() {
+											fileContent := file.Get("body").String()
+											b64enc := base64.StdEncoding.EncodeToString([]byte(fileContent))
+											fileContents = append(fileContents, b64enc)
+										}
+										has := hasMeta(fileContents)
+
+										if isGRC20(funcNameList) && has {
 											if err := addpkg.RegisterGrc20Token(pkgPath); err != nil {
 												f.logger.Error("unable to register grc20 token", zap.Error(err))
 											} else {
@@ -303,6 +319,23 @@ func isGRC20(mainSlice []string) bool {
 	grc20Set := sliceToSet(grc20List)
 
 	return grc20Set.IsSubset(mainSet)
+}
+
+func hasMeta(srcCode []string) bool {
+	for _, src := range srcCode {
+		decode, err := base64.StdEncoding.DecodeString(src)
+		if err != nil {
+			return false
+		}
+
+		matches := bankerRegex_.FindStringSubmatch(string(decode))
+
+		if len(matches) > 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 func sliceToSet(mySlice []string) mapset.Set {
