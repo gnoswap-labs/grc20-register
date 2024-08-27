@@ -10,6 +10,7 @@ import (
 	sr "gno.land/r/gnoswap/v2/staker"
 	pf "gno.land/r/gnoswap/v2/protocol_fee"
 	cp "gno.land/r/gnoswap/v2/community_pool"
+	gs "gno.land/r/gnoswap/v2/gov/staker"
 )
 
 type NewToken struct{}
@@ -36,4 +37,5 @@ func init() {
 	sr.RegisterGRC20Interface("pkgPath", NewToken{})
 	pf.RegisterGRC20Interface("pkgPath", NewToken{})
 	cp.RegisterGRC20Interface("pkgPath", NewToken{})
+	gs.RegisterGRC20Interface("pkgPath", NewToken{})
 }
